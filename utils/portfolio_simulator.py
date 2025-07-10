@@ -79,6 +79,52 @@ class PortfolioSimulator:
             # Fallback to simple statistics
             return returns.mean(), returns.std(), {}
     
+    def get_optimal_allocation_for_sharpe(self, base_allocations: Dict[str, float], 
+                                         crypto_range: List[float] = None,
+                                         days_forward: int = 365,
+                                         n_simulations: int = 1000) -> Tuple[float, float]:
+        """
+        Find optimal crypto allocation that maximizes Sharpe ratio
+        
+        Args:
+            base_allocations: Base allocations without crypto
+            crypto_range: List of crypto percentages to test
+            days_forward: Simulation period
+            n_simulations: Number of simulations
+            
+        Returns:
+            Tuple of (optimal_crypto_percentage, max_sharpe_ratio)
+        """
+        if crypto_range is None:
+            crypto_range = [0, 2.5, 5, 7.5, 10, 12.5, 15, 17.5, 20]
+        
+        best_crypto = 0
+        best_sharpe = -np.inf
+        
+        for crypto_pct in crypto_range:
+            # Adjust allocations
+            test_allocations = base_allocations.copy()
+            
+            # Scale down other allocations
+            scale_factor = (100 - crypto_pct) / 100
+            for asset in test_allocations:
+                test_allocations[asset] *= scale_factor
+            test_allocations['crypto'] = crypto_pct
+            
+            # Run simulation
+            results = self.run_simulation(
+                allocations=test_allocations,
+                n_simulations=n_simulations,
+                days_forward=days_forward,
+                initial_value=1000000  # Use standard value
+            )
+            
+            if results['sharpe_ratio'] > best_sharpe:
+                best_sharpe = results['sharpe_ratio']
+                best_crypto = crypto_pct
+        
+        return best_crypto, best_sharpe
+    
     def _generate_correlated_returns(self, n_days: int, n_simulations: int,
                                    means: Dict, vols: Dict) -> Dict[str, np.ndarray]:
         """Generate correlated returns using Cholesky decomposition"""

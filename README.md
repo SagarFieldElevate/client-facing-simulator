@@ -176,6 +176,43 @@ CMD ["streamlit", "run", "app.py", "--server.address=0.0.0.0"]
 - [ ] Export results to PDF reports
 - [ ] Add user authentication for saved portfolios
 
+## New Features (Phase 1 & 2)
+
+### Comparison Mode
+Toggle between single portfolio analysis and side-by-side comparison of portfolios with and without crypto allocation.
+
+### Protection vs Participation Analysis
+Visualizes the trade-off between downside protection and upside participation for different crypto allocations, highlighting the "sweet spot" for optimal risk-adjusted returns.
+
+### Time Horizon Analysis
+Shows how optimal crypto allocation changes based on investment timeframe (1, 3, 5, and 10 years).
+
+### Regret Minimization
+Probability matrix showing the likelihood of regretting your allocation choice compared to alternatives.
+
+### Break-Even Analysis
+Calculates:
+- How much crypto needs to gain to offset traditional losses
+- How much crypto can drop before wiping out traditional gains
+
+### Advanced Risk Metrics
+- Conditional Value at Risk (CVaR) - Expected loss in worst scenarios
+- Omega Ratio - Better metric for non-normal distributions
+- Dynamic correlation analysis during market stress
+
+### Behavioral Finance Features
+- Loss framing alternatives (positive vs negative framing)
+- Opportunity cost calculations
+- Peer comparison insights
+
+## Usage Tips
+
+1. **Start with Comparison Mode OFF** to understand your current portfolio
+2. **Enable Comparison Mode** to see the impact of adding/removing crypto
+3. **Use the Protection vs Participation chart** to find your optimal allocation
+4. **Check Time Horizon Analysis** to align allocation with your investment timeline
+5. **Review Regret Analysis** to understand psychological aspects of your decision
+
 ## License
 
 This project is proprietary software. All rights reserved.
