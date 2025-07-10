@@ -1,0 +1,41 @@
+[theme]
+# Primary color for interactive elements
+primaryColor = "#00d4ff"
+
+# Background color for the main content area
+backgroundColor = "#0a0a0a"
+
+# Background color for sidebar and most interactive widgets
+secondaryBackgroundColor = "#141414"
+
+# Color used for almost all text
+textColor = "#ffffff"
+
+# Font family for all text in the app
+font = "sans serif"
+
+# Dark theme base
+base = "dark"
+
+[server]
+# Port configuration
+port = 8501
+
+# Enable CORS
+enableCORS = true
+
+# Enable XSRF protection
+enableXsrfProtection = true
+
+# Max upload size (in MB)
+maxUploadSize = 200
+
+[browser]
+# Tab title
+gatherUsageStats = false
+
+# Hide Streamlit branding
+hideTopBar = false
+
+# Server address
+serverAddress = "localhost"

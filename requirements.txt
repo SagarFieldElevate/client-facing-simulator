@@ -1,0 +1,8 @@
+streamlit>=1.29.0
+pandas>=2.2.0
+numpy>=1.26.2
+plotly>=5.18.0
+pinecone>=3.0.0
+python-dotenv>=1.0.0
+scipy>=1.11.4
+arch>=6.2.0
