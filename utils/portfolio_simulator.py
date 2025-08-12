@@ -81,24 +81,23 @@ class PortfolioSimulator:
     
     def _robust_cholesky(self, corr: np.ndarray) -> np.ndarray:
         """Compute a Cholesky factor, adding small diagonal bumps if needed."""
-        bump = 1e-10
-        max_bump = 1e-3
+        eps0 = 1e-8
         I = np.eye(corr.shape[0])
-        while True:
+        for k in range(1000):
             try:
                 return np.linalg.cholesky(corr)
             except np.linalg.LinAlgError:
-                corr = corr + bump * I
-                bump *= 10
-                if bump > max_bump:
-                    # As last resort, force symmetry and clip eigenvalues
-                    eigvals, eigvecs = np.linalg.eigh((corr + corr.T) / 2)
-                    eigvals = np.clip(eigvals, 1e-8, None)
-                    corr = (eigvecs @ np.diag(eigvals) @ eigvecs.T)
-                    return np.linalg.cholesky(corr)
+                corr = ((corr + corr.T) / 2) + (eps0 * (1.1 ** k)) * I
+        # Last resort: eigen clip
+        eigvals, eigvecs = np.linalg.eigh((corr + corr.T) / 2)
+        eigvals = np.clip(eigvals, 1e-8, None)
+        corr = eigvecs @ np.diag(eigvals) @ eigvecs.T
+        return np.linalg.cholesky(corr)
     
     def _generate_correlated_returns(self, n_days: int, n_simulations: int,
-                                   means: Dict, vols: Dict) -> Dict[str, np.ndarray]:
+                                   means: Dict, vols: Dict,
+                                   distribution: str = 'normal', student_df: int = 8,
+                                   correlation_scale: float = 1.0) -> Dict[str, np.ndarray]:
         """Generate correlated returns using Cholesky decomposition"""
         
         # Order assets consistently
@@ -109,31 +108,39 @@ class PortfolioSimulator:
         mu = np.array([means[asset] for asset in assets])
         sigma = np.array([vols[asset] for asset in assets])
         
-        # Get correlation matrix in same order
-        corr_matrix = np.array([[self.correlation_matrix.loc[a1, a2] 
-                                for a2 in assets] for a1 in assets])
+        # Get correlation matrix in same order and apply scaling to off-diagonals
+        base_corr = np.array([[self.correlation_matrix.loc[a1, a2] 
+                               for a2 in assets] for a1 in assets])
+        I = np.eye(n_assets)
+        scaled_corr = I + correlation_scale * (base_corr - I)
+        # Clip to valid range for safety
+        scaled_corr = np.clip(scaled_corr, -0.99, 0.99)
+        np.fill_diagonal(scaled_corr, 1.0)
         
         # Cholesky decomposition (robust)
-        L = self._robust_cholesky(corr_matrix)
+        L = self._robust_cholesky(scaled_corr)
         
         # Generate random returns
-        returns = {}
-        for sim in range(n_simulations):
-            # Generate independent standard normal random variables
-            z = np.random.randn(n_days, n_assets)
+        returns = {asset: [] for asset in assets}
+        for _ in range(n_simulations):
+            # Generate independent draws
+            if distribution == 'student':
+                t_samples = stats.t.rvs(df=student_df, size=(n_days, n_assets))
+                # Standardize to unit variance: Var(t) = df/(df-2)
+                scale = np.sqrt(student_df / (student_df - 2)) if student_df > 2 else 1.0
+                z = t_samples / scale
+            else:
+                z = np.random.randn(n_days, n_assets)
             
             # Apply correlation structure
             correlated_z = z @ L.T
             
             # Scale by volatility and add drift
             for i, asset in enumerate(assets):
-                if asset not in returns:
-                    returns[asset] = []
-                
                 asset_returns = mu[i] + sigma[i] * correlated_z[:, i]
                 returns[asset].append(asset_returns)
                 
-        # Convert to numpy arrays
+        # Convert to numpy arrays [n_sim, n_days]
         for asset in assets:
             returns[asset] = np.array(returns[asset])
             
@@ -141,7 +148,12 @@ class PortfolioSimulator:
     
     def run_simulation(self, allocations: Dict[str, float], n_simulations: int = 1000,
                       days_forward: int = 365, initial_value: float = 1000000,
-                      risk_free_rate: float = 0.02) -> Dict:
+                      risk_free_rate: float = 0.02,
+                      rebalance_frequency: str = 'daily',
+                      transaction_cost_bps: float = 0.0,
+                      distribution: str = 'normal',
+                      student_df: int = 8,
+                      correlation_scale: float = 1.0) -> Dict:
         """
         Run Monte Carlo simulation for portfolio
         
@@ -151,6 +163,11 @@ class PortfolioSimulator:
             days_forward: Number of days to simulate
             initial_value: Initial portfolio value
             risk_free_rate: Annual risk-free rate (default 2%)
+            rebalance_frequency: 'daily' | 'monthly' | 'quarterly'
+            transaction_cost_bps: cost per rebalance as basis points of traded notional (approximate)
+            distribution: 'normal' or 'student'
+            student_df: degrees of freedom for Student's t (if used)
+            correlation_scale: scale for off-diagonal correlations (1.0 = historical)
             
         Returns:
             Dictionary with simulation results
@@ -175,7 +192,9 @@ class PortfolioSimulator:
         vols = {asset: params['sigma'] for asset, params in asset_params.items()}
         
         simulated_returns = self._generate_correlated_returns(
-            days_forward, n_simulations, means, vols
+            days_forward, n_simulations, means, vols,
+            distribution=distribution, student_df=student_df,
+            correlation_scale=correlation_scale
         )
         
         # Normalize allocations to sum to 100
@@ -187,35 +206,70 @@ class PortfolioSimulator:
         for k in alloc_copy.keys():
             alloc_copy[k] *= scale
         
-        # Calculate portfolio returns
-        portfolio_returns = np.zeros((n_simulations, days_forward))
+        # Determine rebalance period in days
+        if rebalance_frequency == 'monthly':
+            rebalance_period = 21
+        elif rebalance_frequency == 'quarterly':
+            rebalance_period = 63
+        else:
+            rebalance_period = 1
         
-        for asset, weight in alloc_copy.items():
-            if weight > 0:
-                asset_returns = simulated_returns[asset]
-                portfolio_returns += (weight / 100) * asset_returns
-                
-        # Calculate portfolio values
-        portfolio_values = np.zeros((n_simulations, days_forward + 1))
+        # Transaction cost rate per unit traded
+        tc_rate = float(transaction_cost_bps) / 10000.0
+        
+        assets = list(alloc_copy.keys())
+        n_days = days_forward
+        S = n_simulations
+        
+        # Initialize per-asset values [S]
+        target_weights = np.array([alloc_copy[a] / 100.0 for a in assets])
+        asset_values = {a: np.full(S, initial_value * (alloc_copy[a] / 100.0), dtype=float) for a in assets}
+        
+        portfolio_values = np.zeros((S, n_days + 1))
         portfolio_values[:, 0] = initial_value
         
-        for i in range(days_forward):
-            portfolio_values[:, i + 1] = portfolio_values[:, i] * (1 + portfolio_returns[:, i])
+        # Simulate day by day with scheduled rebalancing
+        for t in range(n_days):
+            # Grow each asset by its simulated return for day t
+            for i, a in enumerate(assets):
+                asset_values[a] = asset_values[a] * (1.0 + simulated_returns[a][:, t])
             
-        # Calculate metrics
+            # Compute portfolio total after growth
+            total = np.zeros(S)
+            for a in assets:
+                total += asset_values[a]
+            
+            # Rebalance if scheduled
+            if (t + 1) % rebalance_period == 0:
+                # Current weights per sim
+                current_weights = np.stack([asset_values[a] / total for a in assets], axis=1)  # [S, n_assets]
+                # Turnover estimate (0.5 * sum |Δw|)
+                delta_w = np.abs(current_weights - target_weights)
+                turnover = 0.5 * np.sum(delta_w, axis=1)  # [S]
+                # Transaction costs
+                costs = tc_rate * turnover * total  # [S]
+                total_after_costs = np.maximum(0.0, total - costs)
+                # Re-allocate to target weights
+                for i, a in enumerate(assets):
+                    asset_values[a] = target_weights[i] * total_after_costs
+                total = total_after_costs
+            
+            portfolio_values[:, t + 1] = total
+        
+        # Metrics
         final_values = portfolio_values[:, -1]
         total_returns = (final_values / initial_value - 1)
         annual_returns = (final_values / initial_value) ** (365 / days_forward) - 1
         
-        # Calculate drawdowns
+        # Drawdowns (mean across paths)
         drawdowns = []
         for path in portfolio_values:
             running_max = np.maximum.accumulate(path)
             drawdown = (path - running_max) / running_max
             max_drawdown = np.min(drawdown) * 100
             drawdowns.append(abs(max_drawdown))
-            
-        # Align VaR to annual horizon (95% one-sided)
+        
+        # Annual VaR95 (positive % loss)
         var_95 = abs(np.percentile(annual_returns * 100, 5))
         
         # Sharpe ratio with configurable risk-free rate
@@ -228,14 +282,12 @@ class PortfolioSimulator:
         for path in portfolio_values:
             running_max = np.maximum.accumulate(path)
             drawdown_start = None
-            
             for i in range(1, len(path)):
                 if path[i] < running_max[i] and drawdown_start is None:
                     drawdown_start = i
                 elif path[i] >= running_max[i] and drawdown_start is not None:
                     recovery_times.append(i - drawdown_start)
                     drawdown_start = None
-                    
         avg_recovery_time = np.mean(recovery_times) if recovery_times else 0
         
         return {

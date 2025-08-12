@@ -157,7 +157,7 @@ if 'allocations' not in st.session_state:
         'crypto': 5.0
     }
 if 'comparison_mode' not in st.session_state:
-    st.session_state.comparison_mode = False
+    st.session_state.comparison_mode = True
 
 # Title and subtitle
 st.markdown("<h1>Field Elevate Portfolio Risk Simulator</h1>", unsafe_allow_html=True)
@@ -266,6 +266,13 @@ with col2:
    comparison_mode = st.toggle("Comparison Mode", value=st.session_state.comparison_mode)
    st.session_state.comparison_mode = comparison_mode
 st.markdown('</div>', unsafe_allow_html=True)
+
+# Monte Carlo simulation notice
+st.info(
+    f"All projections shown are generated via Monte Carlo simulation "
+    f"(n={n_simulations:,}, horizon={simulation_days} days) using historical data for drift/correlation "
+    f"and GARCH-based volatility. These are estimates, not guarantees."
+)
 
 # Main content area - Key Metrics
 if comparison_mode and allocations['crypto'] > 0:
