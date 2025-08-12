@@ -66,9 +66,9 @@ class PortfolioSimulator:
             alpha = res.params['alpha[1]']
             beta = res.params['beta[1]']
             
-            # Calculate long-run volatility
+            # Calculate long-run volatility (percent units)
             long_run_var = omega / (1 - alpha - beta)
-            long_run_vol = np.sqrt(long_run_var) / 100  # Convert back to decimal
+            long_run_vol = np.sqrt(long_run_var) / 100  # convert to decimal
             
             return returns.mean(), long_run_vol, {
                 'omega': omega,
@@ -140,7 +140,8 @@ class PortfolioSimulator:
         return returns
     
     def run_simulation(self, allocations: Dict[str, float], n_simulations: int = 1000,
-                      days_forward: int = 365, initial_value: float = 1000000) -> Dict:
+                      days_forward: int = 365, initial_value: float = 1000000,
+                      risk_free_rate: float = 0.02) -> Dict:
         """
         Run Monte Carlo simulation for portfolio
         
@@ -149,6 +150,7 @@ class PortfolioSimulator:
             n_simulations: Number of simulation paths
             days_forward: Number of days to simulate
             initial_value: Initial portfolio value
+            risk_free_rate: Annual risk-free rate (default 2%)
             
         Returns:
             Dictionary with simulation results
@@ -213,11 +215,10 @@ class PortfolioSimulator:
             max_drawdown = np.min(drawdown) * 100
             drawdowns.append(abs(max_drawdown))
             
-        # Calculate Value at Risk
-        var_95 = np.percentile(total_returns * 100, 5)
+        # Align VaR to annual horizon (95% one-sided)
+        var_95 = abs(np.percentile(annual_returns * 100, 5))
         
-        # Calculate Sharpe ratio (assuming risk-free rate of 2%)
-        risk_free_rate = 0.02
+        # Sharpe ratio with configurable risk-free rate
         excess_returns = annual_returns - risk_free_rate
         sharpe_denom = np.std(excess_returns)
         sharpe_ratio = np.mean(excess_returns) / sharpe_denom if sharpe_denom > 0 else 0.0
@@ -249,7 +250,7 @@ class PortfolioSimulator:
             'worst_case_value': np.percentile(final_values, 5),
             'sharpe_ratio': sharpe_ratio,
             'max_drawdown': np.mean(drawdowns),
-            'var_95': abs(var_95),
+            'var_95': var_95,
             'recovery_days': int(avg_recovery_time),
             'simulation_days': days_forward,
             'n_simulations': n_simulations

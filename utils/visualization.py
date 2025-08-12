@@ -228,14 +228,22 @@ def create_return_distribution(results: Dict, title: str) -> go.Figure:
 def create_risk_gauge(results: Dict, title: str) -> go.Figure:
     """Create risk gauge visualization"""
     
-    # Calculate risk score based on multiple factors
-    volatility = np.std(results['annual_returns']) * 100
-    max_drawdown = results['max_drawdown']
-    var_95 = results['var_95']
-    
-    # Normalize to 0-100 scale
-    risk_score = min(100, (volatility + max_drawdown + var_95) / 3)
-    
+    # Raw components
+    volatility_pct = float(np.std(results['annual_returns']) * 100)
+    max_drawdown_pct = float(results['max_drawdown'])
+    var_95_pct = float(results['var_95'])
+
+    # Normalize components to 0-100 (capped) using typical ranges
+    # Volatility: 0–50% → 0–100
+    vol_score = max(0.0, min(100.0, (volatility_pct / 50.0) * 100.0))
+    # Max drawdown: 0–60% → 0–100
+    dd_score = max(0.0, min(100.0, (max_drawdown_pct / 60.0) * 100.0))
+    # VaR95: 0–40% → 0–100
+    var_score = max(0.0, min(100.0, (var_95_pct / 40.0) * 100.0))
+
+    # Weighted combination (tunable)
+    risk_score = 0.4 * vol_score + 0.4 * dd_score + 0.2 * var_score
+
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=risk_score,
@@ -260,8 +268,8 @@ def create_risk_gauge(results: Dict, title: str) -> go.Figure:
             }
         }
     ))
-    
-    # Add risk level text
+
+    # Risk level label
     if risk_score < 25:
         risk_level = "Low Risk"
     elif risk_score < 50:
@@ -270,14 +278,14 @@ def create_risk_gauge(results: Dict, title: str) -> go.Figure:
         risk_level = "High Risk"
     else:
         risk_level = "Very High Risk"
-        
+
     fig.add_annotation(
         x=0.5, y=0.3,
         text=risk_level,
         showarrow=False,
         font=dict(size=20, color="white")
     )
-    
+
     fig.update_layout(
         template="plotly_dark",
         plot_bgcolor='rgba(0,0,0,0)',
@@ -285,7 +293,7 @@ def create_risk_gauge(results: Dict, title: str) -> go.Figure:
         font=dict(color='white'),
         height=400
     )
-    
+
     return fig
 
 
