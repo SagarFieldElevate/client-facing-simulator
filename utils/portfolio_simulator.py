@@ -79,51 +79,23 @@ class PortfolioSimulator:
             # Fallback to simple statistics
             return returns.mean(), returns.std(), {}
     
-    def get_optimal_allocation_for_sharpe(self, base_allocations: Dict[str, float], 
-                                         crypto_range: List[float] = None,
-                                         days_forward: int = 365,
-                                         n_simulations: int = 1000) -> Tuple[float, float]:
-        """
-        Find optimal crypto allocation that maximizes Sharpe ratio
-        
-        Args:
-            base_allocations: Base allocations without crypto
-            crypto_range: List of crypto percentages to test
-            days_forward: Simulation period
-            n_simulations: Number of simulations
-            
-        Returns:
-            Tuple of (optimal_crypto_percentage, max_sharpe_ratio)
-        """
-        if crypto_range is None:
-            crypto_range = [0, 2.5, 5, 7.5, 10, 12.5, 15, 17.5, 20]
-        
-        best_crypto = 0
-        best_sharpe = -np.inf
-        
-        for crypto_pct in crypto_range:
-            # Adjust allocations
-            test_allocations = base_allocations.copy()
-            
-            # Scale down other allocations
-            scale_factor = (100 - crypto_pct) / 100
-            for asset in test_allocations:
-                test_allocations[asset] *= scale_factor
-            test_allocations['crypto'] = crypto_pct
-            
-            # Run simulation
-            results = self.run_simulation(
-                allocations=test_allocations,
-                n_simulations=n_simulations,
-                days_forward=days_forward,
-                initial_value=1000000  # Use standard value
-            )
-            
-            if results['sharpe_ratio'] > best_sharpe:
-                best_sharpe = results['sharpe_ratio']
-                best_crypto = crypto_pct
-        
-        return best_crypto, best_sharpe
+    def _robust_cholesky(self, corr: np.ndarray) -> np.ndarray:
+        """Compute a Cholesky factor, adding small diagonal bumps if needed."""
+        bump = 1e-10
+        max_bump = 1e-3
+        I = np.eye(corr.shape[0])
+        while True:
+            try:
+                return np.linalg.cholesky(corr)
+            except np.linalg.LinAlgError:
+                corr = corr + bump * I
+                bump *= 10
+                if bump > max_bump:
+                    # As last resort, force symmetry and clip eigenvalues
+                    eigvals, eigvecs = np.linalg.eigh((corr + corr.T) / 2)
+                    eigvals = np.clip(eigvals, 1e-8, None)
+                    corr = (eigvecs @ np.diag(eigvals) @ eigvecs.T)
+                    return np.linalg.cholesky(corr)
     
     def _generate_correlated_returns(self, n_days: int, n_simulations: int,
                                    means: Dict, vols: Dict) -> Dict[str, np.ndarray]:
@@ -141,8 +113,8 @@ class PortfolioSimulator:
         corr_matrix = np.array([[self.correlation_matrix.loc[a1, a2] 
                                 for a2 in assets] for a1 in assets])
         
-        # Cholesky decomposition
-        L = np.linalg.cholesky(corr_matrix)
+        # Cholesky decomposition (robust)
+        L = self._robust_cholesky(corr_matrix)
         
         # Generate random returns
         returns = {}
@@ -157,7 +129,7 @@ class PortfolioSimulator:
             for i, asset in enumerate(assets):
                 if asset not in returns:
                     returns[asset] = []
-                    
+                
                 asset_returns = mu[i] + sigma[i] * correlated_z[:, i]
                 returns[asset].append(asset_returns)
                 
@@ -204,10 +176,19 @@ class PortfolioSimulator:
             days_forward, n_simulations, means, vols
         )
         
+        # Normalize allocations to sum to 100
+        alloc_copy = allocations.copy()
+        total_alloc = sum(alloc_copy.values())
+        if total_alloc <= 0:
+            raise ValueError("Total allocation must be greater than 0")
+        scale = 100.0 / total_alloc
+        for k in alloc_copy.keys():
+            alloc_copy[k] *= scale
+        
         # Calculate portfolio returns
         portfolio_returns = np.zeros((n_simulations, days_forward))
         
-        for asset, weight in allocations.items():
+        for asset, weight in alloc_copy.items():
             if weight > 0:
                 asset_returns = simulated_returns[asset]
                 portfolio_returns += (weight / 100) * asset_returns
@@ -238,7 +219,8 @@ class PortfolioSimulator:
         # Calculate Sharpe ratio (assuming risk-free rate of 2%)
         risk_free_rate = 0.02
         excess_returns = annual_returns - risk_free_rate
-        sharpe_ratio = np.mean(excess_returns) / np.std(excess_returns)
+        sharpe_denom = np.std(excess_returns)
+        sharpe_ratio = np.mean(excess_returns) / sharpe_denom if sharpe_denom > 0 else 0.0
         
         # Recovery time (average days to recover from drawdown)
         recovery_times = []

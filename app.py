@@ -280,15 +280,19 @@ if comparison_mode and allocations['crypto'] > 0:
        )
    
    with col2:
-       # Crypto allocation goes to stocks
-       trad_stocks = allocations['stocks'] + allocations['crypto']
-       trad_bonds = allocations['bonds']
-       trad_re = allocations['real_estate']
+       # Proportional rebalancing of crypto into non-crypto assets
+       non_crypto_total = allocations['stocks'] + allocations['bonds'] + allocations['real_estate']
+       if non_crypto_total > 0:
+           stocks_new = allocations['stocks'] + allocations['crypto'] * (allocations['stocks'] / non_crypto_total)
+           bonds_new = allocations['bonds'] + allocations['crypto'] * (allocations['bonds'] / non_crypto_total)
+           re_new = allocations['real_estate'] + allocations['crypto'] * (allocations['real_estate'] / non_crypto_total)
+       else:
+           stocks_new, bonds_new, re_new = 100.0, 0.0, 0.0
        
        st.metric(
            "Without Crypto",
-           "→ Stocks",
-           f"S:{trad_stocks:.0f}% B:{trad_bonds:.0f}% RE:{trad_re:.0f}%"
+           "→ Rebalanced",
+           f"S:{stocks_new:.0f}% B:{bonds_new:.0f}% RE:{re_new:.0f}%"
        )
    
    with col3:
@@ -455,7 +459,7 @@ if st.session_state.simulation_results:
                st.markdown("#### Risk-Adjusted Return")
                sharpe_with = comparison_data['with_crypto']['sharpe_ratio']
                sharpe_without = comparison_data['without_crypto']['sharpe_ratio']
-               sharpe_improvement = ((sharpe_with / sharpe_without) - 1) * 100
+               sharpe_improvement = (sharpe_with / sharpe_without - 1) * 100 if abs(sharpe_without) > 1e-12 else float('nan')
                st.markdown(f"**{sharpe_improvement:+.1f}%** Sharpe improvement")
                st.markdown(f"Better risk-adjusted returns")
                st.markdown('</div>', unsafe_allow_html=True)
@@ -490,8 +494,26 @@ if st.session_state.simulation_results:
                protection_data.append(protection)
                participation_data.append(participation)
            
-           # Find sweet spot (max Sharpe ratio improvement)
-           sweet_spot_idx = 2  # Default to 5%
+           # Find sweet spot dynamically: highest Sharpe ratio improvement vs 0%
+           base_sharpe = st.session_state.comparison_results['without_crypto']['sharpe_ratio'] if st.session_state.comparison_results else None
+           if base_sharpe is not None:
+               sharpe_improvements = []
+               for crypto_pct in crypto_allocations:
+                   test_alloc = allocations.copy()
+                   scale_factor = (100 - crypto_pct) / (100 - allocations['crypto']) if (100 - allocations['crypto']) > 0 else 0
+                   for asset in ['stocks', 'bonds', 'real_estate']:
+                       test_alloc[asset] = allocations[asset] * scale_factor
+                   test_alloc['crypto'] = crypto_pct
+                   test_res = simulator.run_simulation(
+                       allocations=test_alloc,
+                       n_simulations=min(300, n_simulations),
+                       days_forward=simulation_days,
+                       initial_value=portfolio_value
+                   )
+                   sharpe_improvements.append(test_res['sharpe_ratio'] - base_sharpe)
+               sweet_spot_idx = int(np.argmax(sharpe_improvements))
+           else:
+               sweet_spot_idx = 2  # fallback
            
            # Create visualization
            pp_chart = create_portfolio_charts(
@@ -558,11 +580,13 @@ if st.session_state.simulation_results:
            # Calculate regret matrix
            with st.spinner("Calculating regret probabilities..."):
                regret_results = calculate_regret_matrix(
-                   simulator=simulator,
-                   initial_value=portfolio_value,
-                   n_simulations=min(500, n_simulations),
-                   days_forward=simulation_days
-               )
+                    simulator=simulator,
+                    initial_value=portfolio_value,
+                    n_simulations=min(500, n_simulations),
+                    days_forward=simulation_days,
+                    base_allocations=allocations,
+                    crypto_allocations=[0, 2.5, 5, 7.5, 10]
+                )
            
            # Create visualization
            regret_chart = create_portfolio_charts(
@@ -593,7 +617,7 @@ if st.session_state.simulation_results:
            st.markdown("### Break-Even Analysis")
            st.markdown("*Understanding your risk boundaries*")
            
-           # Calculate break-even scenarios
+           # Calculate break-even scenarios using current allocations scaled for target crypto
            crypto_allocations = [2.5, 5, 7.5, 10, 15, 20]
            gains_needed = []
            drops_allowed = []
@@ -607,12 +631,12 @@ if st.session_state.simulation_results:
            }
            
            for crypto_pct in crypto_allocations:
-               test_alloc = {
-                   'stocks': 60 * (100 - crypto_pct) / 100,
-                   'bonds': 30 * (100 - crypto_pct) / 100,
-                   'real_estate': 10 * (100 - crypto_pct) / 100,
-                   'crypto': crypto_pct
-               }
+               # Proportionally scale current non-crypto allocations
+               test_alloc = allocations.copy()
+               scale_factor = (100 - crypto_pct) / (100 - allocations['crypto']) if (100 - allocations['crypto']) > 0 else 0
+               for asset in ['stocks', 'bonds', 'real_estate']:
+                   test_alloc[asset] = allocations[asset] * scale_factor
+               test_alloc['crypto'] = crypto_pct
                
                break_even = calculate_break_even_scenarios(test_alloc, market_scenario)
                gains_needed.append(break_even['crypto_gain_needed'])
@@ -754,11 +778,11 @@ The analysis demonstrates that thoughtful crypto integration enhances portfolio 
            with col1:
                st.markdown("#### Conditional Value at Risk (CVaR)")
                cvar_with = calculate_cvar(
-                   comparison_data['with_crypto']['annual_returns'] - 1,
+                   comparison_data['with_crypto']['annual_returns'],
                    0.95
                )
                cvar_without = calculate_cvar(
-                   comparison_data['without_crypto']['annual_returns'] - 1,
+                   comparison_data['without_crypto']['annual_returns'],
                    0.95
                )
                

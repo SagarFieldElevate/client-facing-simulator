@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Optional, List
 
+
 def create_portfolio_charts(data: Dict, chart_type: str, title: str = "") -> go.Figure:
     """
     Create various portfolio visualization charts
@@ -42,6 +43,7 @@ def create_portfolio_charts(data: Dict, chart_type: str, title: str = "") -> go.
         return create_comparison_chart(data, title)
     else:
         raise ValueError(f"Unknown chart type: {chart_type}")
+
 
 def create_fan_chart(results: Dict, title: str) -> go.Figure:
     """Create fan chart showing portfolio projections"""
@@ -168,6 +170,7 @@ def create_fan_chart(results: Dict, title: str) -> go.Figure:
     
     return fig
 
+
 def create_return_distribution(results: Dict, title: str) -> go.Figure:
     """Create histogram of returns"""
     
@@ -220,6 +223,7 @@ def create_return_distribution(results: Dict, title: str) -> go.Figure:
     )
     
     return fig
+
 
 def create_risk_gauge(results: Dict, title: str) -> go.Figure:
     """Create risk gauge visualization"""
@@ -284,6 +288,7 @@ def create_risk_gauge(results: Dict, title: str) -> go.Figure:
     
     return fig
 
+
 def create_correlation_heatmap(portfolio_data: Dict, title: str) -> go.Figure:
     """Create correlation heatmap for assets"""
     
@@ -292,11 +297,19 @@ def create_correlation_heatmap(portfolio_data: Dict, title: str) -> go.Figure:
     
     corr_matrix = portfolio_data['correlation_matrix']
     
+    # Ensure consistent order ['stocks','bonds','real_estate','crypto'] where available
+    desired_order = [col for col in ['stocks', 'bonds', 'real_estate', 'crypto'] if col in corr_matrix.columns]
+    if desired_order:
+        corr_matrix = corr_matrix.reindex(index=desired_order, columns=desired_order)
+        axis_labels = [label.title().replace('_', ' ') for label in desired_order]
+    else:
+        axis_labels = list(corr_matrix.columns)
+    
     # Create heatmap
     fig = go.Figure(data=go.Heatmap(
         z=corr_matrix.values,
-        x=['Stocks', 'Bonds', 'Real Estate', 'Crypto'],
-        y=['Stocks', 'Bonds', 'Real Estate', 'Crypto'],
+        x=axis_labels,
+        y=axis_labels,
         colorscale=[
             [0, '#ff0000'],
             [0.5, '#ffffff'],

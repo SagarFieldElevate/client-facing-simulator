@@ -6,6 +6,7 @@ import pandas as pd
 from typing import Dict, List, Tuple
 from scipy import stats
 
+
 def calculate_cvar(returns: np.ndarray, confidence_level: float = 0.95) -> float:
     """
     Calculate Conditional Value at Risk (CVaR) - expected loss beyond VaR
@@ -29,6 +30,7 @@ def calculate_cvar(returns: np.ndarray, confidence_level: float = 0.95) -> float
     cvar = -np.mean(tail_returns) * 100  # Return as positive percentage
     return cvar
 
+
 def calculate_omega_ratio(returns: np.ndarray, threshold: float = 0) -> float:
     """
     Calculate Omega ratio - probability-weighted ratio of gains vs losses
@@ -47,6 +49,7 @@ def calculate_omega_ratio(returns: np.ndarray, threshold: float = 0) -> float:
         return np.inf
     
     return gains.sum() / losses.sum()
+
 
 def time_horizon_analysis(simulator, allocations: Dict[str, float], 
                          initial_value: float, n_simulations: int = 1000) -> Dict:
@@ -103,34 +106,58 @@ def time_horizon_analysis(simulator, allocations: Dict[str, float],
     
     return results
 
+
 def calculate_regret_matrix(simulator, initial_value: float, 
-                          n_simulations: int = 1000, days_forward: int = 365) -> Dict:
+                          n_simulations: int = 1000, days_forward: int = 365,
+                          base_allocations: Dict[str, float] = None,
+                          crypto_allocations: List[float] = None) -> Dict:
     """
     Calculate regret matrix for different crypto allocations
+    
+    Args:
+        simulator: PortfolioSimulator instance
+        initial_value: starting portfolio value
+        n_simulations: number of MC simulations
+        days_forward: horizon in days
+        base_allocations: non-crypto baseline weights to be scaled (sum can be 100 or less if includes crypto)
+        crypto_allocations: list of crypto percentages to test
     
     Returns:
         Dictionary with regret probabilities
     """
-    crypto_allocations = [0, 2.5, 5, 7.5, 10]
+    crypto_allocations = crypto_allocations or [0, 2.5, 5, 7.5, 10]
     
-    # Base allocations (will be adjusted)
-    base_allocations = {
-        'stocks': 60,
-        'bonds': 30,
-        'real_estate': 10,
-        'crypto': 0
-    }
+    # Default base allocations if none provided
+    if base_allocations is None:
+        base_allocations = {
+            'stocks': 60,
+            'bonds': 30,
+            'real_estate': 10,
+            'crypto': 0
+        }
+    
+    # Normalize base non-crypto to sum to 100 - we will later blend crypto
+    non_crypto_sum = base_allocations.get('stocks', 0) + base_allocations.get('bonds', 0) + base_allocations.get('real_estate', 0)
+    if non_crypto_sum == 0:
+        base_non_crypto = {'stocks': 100.0, 'bonds': 0.0, 'real_estate': 0.0}
+    else:
+        base_non_crypto = {
+            'stocks': base_allocations.get('stocks', 0) / non_crypto_sum * 100.0,
+            'bonds': base_allocations.get('bonds', 0) / non_crypto_sum * 100.0,
+            'real_estate': base_allocations.get('real_estate', 0) / non_crypto_sum * 100.0,
+        }
     
     results = []
     
     for crypto_pct in crypto_allocations:
-        # Adjust allocations
-        test_allocations = base_allocations.copy()
-        scale_factor = (100 - crypto_pct) / 100
-        test_allocations['stocks'] = base_allocations['stocks'] * scale_factor
-        test_allocations['bonds'] = base_allocations['bonds'] * scale_factor
-        test_allocations['real_estate'] = base_allocations['real_estate'] * scale_factor
-        test_allocations['crypto'] = crypto_pct
+        # Build test allocations by scaling base non-crypto and adding crypto
+        scale_factor = (100 - crypto_pct) / 100.0
+        test_allocations = {
+            'stocks': base_non_crypto['stocks'] * scale_factor,
+            'bonds': base_non_crypto['bonds'] * scale_factor,
+            'real_estate': base_non_crypto['real_estate'] * scale_factor,
+            'crypto': crypto_pct
+        }
         
         # Run simulation
         sim_results = simulator.run_simulation(
@@ -174,6 +201,7 @@ def calculate_regret_matrix(simulator, initial_value: float,
         'results': results
     }
 
+
 def calculate_dynamic_correlation(returns_data: Dict[str, pd.Series], 
                                 window: int = 60) -> pd.DataFrame:
     """
@@ -201,6 +229,7 @@ def calculate_dynamic_correlation(returns_data: Dict[str, pd.Series],
                 )
     
     return pd.DataFrame(rolling_corr)
+
 
 def stress_test_correlation_analysis(returns_data: Dict[str, pd.Series],
                                    stress_threshold: float = -0.05) -> Dict:

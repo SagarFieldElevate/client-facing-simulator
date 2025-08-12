@@ -5,26 +5,44 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Tuple, List
 
+
 def calculate_traditional_allocation(allocations: Dict[str, float]) -> Dict[str, float]:
     """
-    Calculate allocation without crypto - crypto allocation goes to stocks
-    
+    Calculate allocation without crypto by redistributing the crypto weight
+    proportionally across non-crypto assets.
+
     Args:
         allocations: Original allocations including crypto
-        
+
     Returns:
-        Allocations with crypto portion added to stocks
+        Allocations with crypto portion removed and proportionally reallocated
+        to the remaining assets
     """
     traditional_allocations = allocations.copy()
-    crypto_portion = traditional_allocations.pop('crypto', 0)
-    
+    crypto_portion = traditional_allocations.pop('crypto', 0.0)
+
     if crypto_portion == 0:
         return traditional_allocations
-    
-    # Add crypto allocation to stocks
-    traditional_allocations['stocks'] = traditional_allocations.get('stocks', 0) + crypto_portion
-    
+
+    # Total weight of non-crypto assets
+    total_non_crypto = sum(traditional_allocations.values())
+    if total_non_crypto == 0:
+        # Edge case: everything was crypto → move all to stocks by convention
+        traditional_allocations['stocks'] = 100.0
+        return traditional_allocations
+
+    # Proportionally redistribute the crypto weight
+    for asset in traditional_allocations.keys():
+        share = traditional_allocations[asset] / total_non_crypto
+        traditional_allocations[asset] += crypto_portion * share
+
+    # Ensure numerical stability (sum to exactly 100)
+    scale = 100.0 / sum(traditional_allocations.values())
+    for asset in traditional_allocations.keys():
+        traditional_allocations[asset] *= scale
+
     return traditional_allocations
+
 
 def calculate_portfolio_comparison(simulator, allocations: Dict[str, float], 
                                  n_simulations: int, days_forward: int, 
@@ -71,6 +89,7 @@ def calculate_portfolio_comparison(simulator, allocations: Dict[str, float],
         }
     }
 
+
 def calculate_protection_participation(comparison_results: Dict) -> Tuple[List[float], List[float]]:
     """
     Calculate protection vs participation metrics for different crypto allocations
@@ -94,6 +113,7 @@ def calculate_protection_participation(comparison_results: Dict) -> Tuple[List[f
     
     return downside_protection, upside_participation
 
+
 def calculate_break_even_scenarios(allocations: Dict[str, float], 
                                  asset_returns: Dict[str, float]) -> Dict:
     """
@@ -101,7 +121,7 @@ def calculate_break_even_scenarios(allocations: Dict[str, float],
     
     Args:
         allocations: Portfolio allocations
-        asset_returns: Expected returns for each asset
+        asset_returns: Expected returns for each asset (percent or decimal)
         
     Returns:
         Dictionary with break-even calculations
@@ -111,28 +131,33 @@ def calculate_break_even_scenarios(allocations: Dict[str, float],
     if crypto_alloc == 0:
         return {'crypto_needed': np.inf, 'traditional_loss_covered': 0}
     
-    # Calculate weighted traditional return
-    traditional_return = 0
-    total_traditional = 0
+    # Normalize asset returns to decimals
+    def to_decimal(x: float) -> float:
+        return x / 100.0 if abs(x) > 1 else x
+
+    # Calculate weighted traditional return (decimal)
+    traditional_return = 0.0
+    total_traditional = 0.0
     for asset, alloc in allocations.items():
         if asset != 'crypto':
-            traditional_return += (alloc / 100) * asset_returns.get(asset, 0)
+            r = to_decimal(asset_returns.get(asset, 0.0))
+            traditional_return += (alloc / 100) * r
             total_traditional += alloc / 100
     
     # How much crypto needs to rise to offset traditional losses
     if traditional_return < 0:
         crypto_gain_needed = abs(traditional_return * total_traditional / crypto_alloc)
     else:
-        crypto_gain_needed = 0
+        crypto_gain_needed = 0.0
     
     # How much crypto can drop before wiping out traditional gains
     if traditional_return > 0:
         crypto_drop_allowed = traditional_return * total_traditional / crypto_alloc
     else:
-        crypto_drop_allowed = 0
+        crypto_drop_allowed = 0.0
     
     return {
-        'crypto_gain_needed': crypto_gain_needed * 100,  # Convert to percentage
-        'crypto_drop_allowed': crypto_drop_allowed * 100,
-        'traditional_return': traditional_return * 100
+        'crypto_gain_needed': crypto_gain_needed * 100,  # percentage
+        'crypto_drop_allowed': crypto_drop_allowed * 100,  # percentage
+        'traditional_return': traditional_return * 100  # percentage
     }
